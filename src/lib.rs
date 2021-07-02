@@ -63,34 +63,11 @@ pub enum Error {
     #[fail(display = "failed to parse steam id")]
     /// There was an error parsing the Steam ID returned to the callback
     ParseSteamId,
-    #[fail(display = "failed to build HTTP request or response: {}", _0)]
-    BuildHttpStruct(http::Error),
     #[fail(display = "error serializing url encoded data: {}", _0)]
     Serialize(serde_urlencoded::ser::Error),
     #[fail(display = "error deserializing url encoded data: {}", _0)]
     Deserialize(serde_urlencoded::de::Error),
     #[fail(display = "reqwest error: {}", _0)]
-    #[cfg(feature = "reqwest-09x")]
     /// There was an error during the verify request
     Reqwest(reqwest::Error),
-}
-
-#[cfg(feature = "reqwest-0_9")]
-pub fn verify_response_async(
-    client: &reqwest::r#async::Client,
-    mut form: SteamAuthResponse,
-) -> impl futures::Future<Item = u64, Error = Error> {
-    client
-        .post(STEAM_URL)
-        .form(&form)
-        .send()
-        .map_err(Error::Reqwest)
-        .and_then(|res| res.into_body().concat2().map_err(Error::Reqwest))
-        .and_then(move |body| {
-            let s = std::str::from_utf8(&body)
-                .map_err(|_| Error::AuthenticationFailed)?
-                .to_owned();
-
-            parse_verify_response(&form.claimed_id, s)
-        })
 }

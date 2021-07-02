@@ -33,16 +33,6 @@ impl Redirector {
         Ok(Self { url })
     }
 
-    /// Constructs a new HTTP response which redirects the user to the URL, starting the login
-    /// process.
-    pub fn create_response(&self) -> Result<http::Response<()>, Error> {
-        http::Response::builder()
-            .status(http::StatusCode::FOUND)
-            .header("Location", self.url.as_str())
-            .body(())
-            .map_err(Error::BuildHttpStruct)
-    }
-
     /// Gets the URL to which users should be redirected.
     pub fn url(&self) -> &Url {
         &self.url

@@ -1,10 +1,6 @@
 use crate::{Error, STEAM_URL};
 
-#[cfg(feature = "reqwest-09x")]
-use futures::{
-    future::{self, Either},
-    Future, Stream,
-};
+use reqwest::{Request, RequestBuilder, Response, Url};
 
 #[derive(Debug, Clone)]
 /// Verifies the login details returned after users have gone through the 'sign in with Steam' page
@@ -29,21 +25,14 @@ pub struct Verifier {
 }
 
 impl Verifier {
-    /// Constructs a Verifier and a HTTP request from a query string. You must use the method,
-    /// headers, URI and body from the returned `http::Request` struct.
-    pub fn from_querystring<S: AsRef<str>>(s: S) -> Result<(http::Request<Vec<u8>>, Self), Error> {
+    pub async fn from_querystring<S: AsRef<str>>(s: S) -> Result<(Response, Self), Error> {
         let form = serde_urlencoded::from_str(s.as_ref()).map_err(Error::Deserialize)?;
-
-        Self::from_parsed(form)
+        Self::from_parsed(form).await
     }
 
-    /// Constructs a Verifier and a HTTP request directly from the data deserialized from the query
-    /// string. This may be useful if you are using a web framework which offers the ability to
-    /// deserialize data during route matching. You must use the method, headers, URI and body from
-    /// the returned `http::Request` struct.
-    pub fn from_parsed(
+    pub async fn from_parsed(
         mut login_data: SteamLoginData,
-    ) -> Result<(http::Request<Vec<u8>>, Self), Error> {
+    ) -> Result<(Response, Self), Error> {
         login_data.mode = "check_authentication".to_owned();
 
         let verifier = {
@@ -60,14 +49,12 @@ impl Verifier {
             .map_err(Error::Serialize)?
             .into_bytes();
 
-        let req = http::Request::builder()
-            .method(http::Method::POST)
-            .uri(STEAM_URL)
+        let response = reqwest::Client::new().request(reqwest::Method::POST, STEAM_URL)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(form_data)
-            .map_err(Error::BuildHttpStruct)?;
+            .send().await.map_err(Error::Reqwest)?;
 
-        Ok((req, verifier))
+        Ok((response, verifier))
     }
 
     /// Verifies the response from the steam servers.
@@ -87,62 +74,6 @@ impl Verifier {
         } else {
             Err(Error::AuthenticationFailed)
         }
-    }
-
-    #[cfg(feature = "reqwest-09x")]
-    /// Constructs and sends a synchronous verification request. Requires the `reqwest-09x`
-    /// feature.
-    pub fn make_verify_request<S: AsRef<str>>(
-        client: &reqwest::Client,
-        querystring: S,
-    ) -> Result<u64, Error> {
-        let (req, verifier) = Self::from_querystring(querystring)?;
-
-        let (parts, body) = req.into_parts();
-
-        client
-            .post(&parts.uri.to_string())
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .map_err(Error::Reqwest)
-            .and_then(|mut response| {
-                let text = response.text().map_err(Error::Reqwest)?;
-
-                verifier.verify_response(text)
-            })
-    }
-
-    #[cfg(feature = "reqwest-09x")]
-    /// Constructs and sends an asynchronous verification request. Requires the `reqwest-09x`
-    /// feature.
-    pub fn make_verify_request_async<S: AsRef<str>>(
-        client: &reqwest::r#async::Client,
-        querystring: S,
-    ) -> impl Future<Item = u64, Error = Error> {
-        let (req, verifier) = match Self::from_querystring(querystring) {
-            Ok(rv) => rv,
-            Err(e) => return Either::A(future::err(e)),
-        };
-
-        let (parts, body) = req.into_parts();
-
-        Either::B(
-            client
-                .post(&parts.uri.to_string())
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(body)
-                .send()
-                .map_err(Error::Reqwest)
-                .and_then(|res| res.into_body().concat2().map_err(Error::Reqwest))
-                .and_then(move |body| {
-                    let s = std::str::from_utf8(&body)
-                        .map_err(|_| Error::AuthenticationFailed)?
-                        .to_owned();
-
-                    verifier.verify_response(s)
-                }),
-        )
     }
 }
 
